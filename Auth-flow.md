@@ -6,11 +6,9 @@
 
 1. [Tổng quan](#1-tổng-quan)
 2. [Workflow Diagrams](#2-workflow-diagrams)
-3. [API Endpoints](#3-api-endpoints)
-4. [Database Schema](#4-database-schema)
-5. [JWT Structure](#5-jwt-structure)
-6. [Error Codes](#6-error-codes)
-7. [Security Considerations](#7-security-considerations)
+3. [JWT Structure](#5-jwt-structure)
+4. [Error Codes](#6-error-codes)
+5. [Security Considerations](#7-security-considerations)
 
 ---
 
@@ -47,7 +45,7 @@ Hệ thống authentication sử dụng Google OAuth 2.0 để xác thực ngư�
      │                  │                 │   User info     │
      │                  │                 │<────────────────│
      │                  │                 │                 │
-     │                  │  {access_token} + Set-Cookie(RT)  │
+     │                  │  Set-Cookie(AT) + Set-Cookie(RT)  │
      │                  │<────────────────│                 │
      │  Redirect Home   │                 │                 │
      │<─────────────────│                 │                 │
@@ -107,12 +105,13 @@ Hệ thống authentication sử dụng Google OAuth 2.0 để xác thực ngư�
               │
               ▼
 [BE] ──► Response:
-         - Body: { access_token, user_info }
-         - Set-Cookie: refresh_token (HttpOnly, Secure, SameSite)
+         - Body: { user_info }
+         - Set-Cookie: access_token (HttpOnly, Secure, SameSite=None)
+         - Set-Cookie: refresh_token (HttpOnly, Secure, SameSite=None)
               │
               ▼
-[FE] ──► Lưu Access Token vào memory/localStorage
-         Refresh Token tự động được browser lưu trong cookie
+[FE] ──► Access Token & Refresh Token tự động được browser lưu trong cookie
+         (credentials: 'include' cho cross-domain requests)
               │
               ▼
 [FE] ──► Redirect về trang Home hoặc trang user request trước đó
@@ -128,10 +127,10 @@ Hệ thống authentication sử dụng Google OAuth 2.0 để xác thực ngư�
 │                    WORKFLOW 2: KIỂM TRA API REQUEST (AUTH MIDDLEWARE)           │
 └─────────────────────────────────────────────────────────────────────────────────┘
 
-[User] ──► Gọi bất kỳ API nào (đã có Access Token)
+[User] ──► Gọi bất kỳ API nào (đã có Access Token trong cookie)
               │
               ▼
-[FE] ──► Gửi request với Header: Authorization: Bearer {access_token}
+[FE] ──► Gửi request với credentials: 'include' (browser tự gửi cookie)
               │
               ▼
 [BE] ──► (1) Validate Access Token
@@ -251,11 +250,12 @@ Hệ thống authentication sử dụng Google OAuth 2.0 để xác thực ngư�
               │
               ▼
 [BE] ──► Response:
-         - Body: { access_token }
-         - Set-Cookie: refresh_token mới (HttpOnly, Secure)
+         - Body: { success: true }
+         - Set-Cookie: access_token mới (HttpOnly, Secure, SameSite=None)
+         - Set-Cookie: refresh_token mới (HttpOnly, Secure, SameSite=None)
               │
               ▼
-[FE] ──► Lưu Access Token mới
+[FE] ──► Access Token mới tự động được browser lưu trong cookie
               │
               ▼
 [FE] ──► Retry lại API request ban đầu với AT mới
@@ -276,8 +276,7 @@ Hệ thống authentication sử dụng Google OAuth 2.0 để xác thực ngư�
               │
               ▼
 [FE] ──► Gọi API: POST /api/auth/logout
-         - Header: Authorization: Bearer {access_token}
-         - Body hoặc Cookie: refresh_token
+         - Cookie: access_token, refresh_token (tự động gửi bởi browser)
               │
               ▼
 [BE] ──► Validate Access Token và Refresh Token
@@ -300,19 +299,18 @@ Hệ thống authentication sử dụng Google OAuth 2.0 để xác thực ngư�
     │                                                   │
     ▼                                                   ▼
 [BE] ──► Return 400 Bad Request              [BE] ──► Return 200 OK
+         + Clear cookie: access_token                 + Clear cookie: access_token
+         + Clear cookie: refresh_token                + Clear cookie: refresh_token
          {                                            {
            success: false,                              success: true,
            error: "LOGOUT_FAILED",                      message: "Logged out successfully"
            message: "Invalid token"                   }
          }                                              │
     │                                                   ▼
-    │                                        [FE] ──► Xóa AT khỏi localStorage/memory
-    │                                                   │
-    │                                                   ▼
-    │                                        [FE] ──► Xóa RT cookie
+    │                                        [FE] ──► Cookies đã được clear bởi BE
     │                                                   │
     ▼                                                   ▼
-[FE] ──► Xóa AT, RT ở client              [FE] ──► Redirect về trang Login
+[FE] ──► Cookies đã được clear bởi BE     [FE] ──► Redirect về trang Login
               │                                         │
               ▼                                         ▼
 [FE] ──► Redirect về trang Login               ══════ END ══════
@@ -325,258 +323,16 @@ Hệ thống authentication sử dụng Google OAuth 2.0 để xác thực ngư�
 
 | Trường hợp | Xử lý BE | Response | Xử lý FE |
 |------------|----------|----------|----------|
-| AT & RT đều valid | Lưu AT vào invalidated_tokens, xóa RT khỏi DB | 200 OK | Xóa tokens, redirect Login |
-| AT invalid, RT valid | Xóa RT khỏi DB | 400 Bad Request | Xóa tokens, redirect Login |
-| AT valid, RT invalid | Lưu AT vào invalidated_tokens | 400 Bad Request | Xóa tokens, redirect Login |
-| AT & RT đều invalid | Không làm gì | 400 Bad Request | Xóa tokens, redirect Login |
-
-> **💡 Tại sao dùng chung response 400 cho các trường hợp fail?**
-> - Bảo mật: Không tiết lộ token nào bị sai
-> - Đơn giản: FE chỉ cần xử lý 1 case - xóa tokens và redirect
-> - Kết quả cuối cùng giống nhau: User được logout
+| AT & RT đều valid | Lưu AT vào invalidated_tokens, xóa RT khỏi DB, clear cookies | 200 OK | Redirect Login |
+| AT invalid, RT valid | Xóa RT khỏi DB, clear cookies | 400 Bad Request | Redirect Login |
+| AT valid, RT invalid | Lưu AT vào invalidated_tokens, clear cookies | 400 Bad Request | Redirect Login |
+| AT & RT đều invalid | Clear cookies | 400 Bad Request | Redirect Login |
 
 ---
 
-## 3. API Endpoints
+## 3. JWT Structure
 
-### 3.1 POST /api/auth/google
-
-**Mô tả:** Đăng nhập với Google OAuth
-
-#### Request
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| code | string | ✅ | Authorization code từ Google |
-| redirect_uri | string | ✅ | Redirect URI đã đăng ký với Google |
-
-```http
-POST /api/auth/google HTTP/1.1
-Host: api.example.com
-Content-Type: application/json
-
-{
-  "code": "4/0AX4XfWh...",
-  "redirect_uri": "https://example.com/callback"
-}
-```
-
-#### Response Success (200 OK)
-
-```json
-{
-  "success": true,
-  "data": {
-    "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-    "token_type": "Bearer",
-    "expires_in": 900,
-    "user": {
-      "id": "550e8400-e29b-41d4-a716-446655440000",
-      "email": "user@example.com",
-      "name": "Nguyen Van A",
-      "avatar": "https://lh3.googleusercontent.com/...",
-      "role": "user"
-    }
-  }
-}
-```
-
-**Response Headers:**
-```
-Set-Cookie: refresh_token=eyJhbGciOiJIUzI1NiIs...; HttpOnly; Secure; SameSite=Strict; Path=/api/auth; Max-Age=604800
-```
-
-#### Response Errors
-
-| Status | Error Code | Description |
-|--------|------------|-------------|
-| 400 | INVALID_CODE | Authorization code không hợp lệ hoặc đã hết hạn |
-| 400 | MISSING_REDIRECT_URI | Thiếu redirect_uri |
-| 403 | USER_NOT_REGISTERED | User không được đăng ký trong hệ thống |
-| 500 | GOOGLE_API_ERROR | Lỗi khi gọi Google API |
-| 500 | INTERNAL_ERROR | Lỗi server |
-
-```json
-{
-  "success": false,
-  "error": {
-    "code": "USER_NOT_REGISTERED",
-    "message": "User is not registered in the system. Please contact administrator."
-  }
-}
-```
-
----
-
-### 3.2 POST /api/auth/refresh
-
-**Mô tả:** Làm mới Access Token bằng Refresh Token
-
-#### Request
-
-```http
-POST /api/auth/refresh HTTP/1.1
-Host: api.example.com
-Cookie: refresh_token=eyJhbGciOiJIUzI1NiIs...
-```
-
-*Không cần body, Refresh Token được gửi qua cookie*
-
-#### Response Success (200 OK)
-
-```json
-{
-  "success": true,
-  "data": {
-    "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
-    "token_type": "Bearer",
-    "expires_in": 900
-  }
-}
-```
-
-#### Response Errors
-
-| Status | Error Code | Description |
-|--------|------------|-------------|
-| 401 | MISSING_REFRESH_TOKEN | Không tìm thấy Refresh Token trong cookie |
-| 401 | INVALID_REFRESH_TOKEN | Refresh Token không hợp lệ hoặc đã hết hạn |
-| 401 | TOKEN_REVOKED | Token đã bị thu hồi |
-| 401 | USER_NOT_FOUND | User không còn tồn tại trong hệ thống |
-
----
-
-### 3.3 POST /api/auth/logout
-
-**Mô tả:** Đăng xuất và thu hồi Refresh Token
-
-#### Request
-
-```http
-POST /api/auth/logout HTTP/1.1
-Host: api.example.com
-Authorization: Bearer eyJhbGciOiJIUzI1NiIs...
-Cookie: refresh_token=eyJhbGciOiJIUzI1NiIs...
-```
-
-#### Response Success (200 OK)
-
-```json
-{
-  "success": true,
-  "message": "Logged out successfully"
-}
-```
-
-**Response Headers:**
-```
-Set-Cookie: refresh_token=; HttpOnly; Secure; SameSite=Strict; Path=/api/auth; Max-Age=0
-```
-
-#### Response Errors
-
-| Status | Error Code | Description |
-|--------|------------|-------------|
-| 401 | UNAUTHORIZED | Không có hoặc Access Token không hợp lệ |
-
----
-
-### 3.4 GET /api/auth/me
-
-**Mô tả:** Lấy thông tin user hiện tại
-
-#### Request
-
-```http
-GET /api/auth/me HTTP/1.1
-Host: api.example.com
-Authorization: Bearer eyJhbGciOiJIUzI1NiIs...
-```
-
-#### Response Success (200 OK)
-
-```json
-{
-  "success": true,
-  "data": {
-    "id": "550e8400-e29b-41d4-a716-446655440000",
-    "email": "user@example.com",
-    "name": "Nguyen Van A",
-    "avatar": "https://lh3.googleusercontent.com/...",
-    "role": "user",
-    "created_at": "2026-01-20T10:00:00Z",
-    "updated_at": "2026-01-25T15:30:00Z"
-  }
-}
-```
-
-#### Response Errors
-
-| Status | Error Code | Description |
-|--------|------------|-------------|
-| 401 | UNAUTHORIZED | Access Token không hợp lệ hoặc đã hết hạn |
-| 404 | USER_NOT_FOUND | User không tồn tại |
-
----
-
-## 4. Database Schema
-
-### 4.1 Bảng Users
-
-```sql
-CREATE TABLE users (
-    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    email       VARCHAR(255) NOT NULL UNIQUE,
-    name        VARCHAR(255) NOT NULL,
-    avatar      VARCHAR(500),
-    role        VARCHAR(50) DEFAULT 'user',
-    is_active   BOOLEAN DEFAULT true,
-    created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-
-    INDEX idx_users_email (email)
-);
-```
-
-### 4.2 Bảng Refresh Tokens
-
-```sql
-CREATE TABLE refresh_tokens (
-    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id     UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    jti         VARCHAR(255) NOT NULL UNIQUE,
-    expires_at  TIMESTAMP NOT NULL,
-    created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    revoked_at  TIMESTAMP NULL,
-
-    INDEX idx_refresh_tokens_jti (jti),
-    INDEX idx_refresh_tokens_user_id (user_id),
-    INDEX idx_refresh_tokens_expires_at (expires_at)
-);
-```
-
-### 4.3 Entity Relationship Diagram
-
-```
-┌─────────────────────┐         ┌─────────────────────────┐
-│       users         │         │    refresh_tokens       │
-├─────────────────────┤         ├─────────────────────────┤
-│ id (PK)             │────┐    │ id (PK)                 │
-│ email               │    │    │ user_id (FK)            │───┘
-│ name                │    └───>│ jti                     │
-│ avatar              │         │ expires_at              │
-│ role                │         │ created_at              │
-│ is_active           │         │ revoked_at              │
-│ created_at          │         └─────────────────────────┘
-│ updated_at          │
-└─────────────────────┘
-```
-
----
-
-## 5. JWT Structure
-
-### 5.1 Access Token
+### 3.1 Access Token
 
 **Header:**
 ```json
@@ -590,8 +346,6 @@ CREATE TABLE refresh_tokens (
 ```json
 {
   "sub": "550e8400-e29b-41d4-a716-446655440000",
-  "email": "user@example.com",
-  "name": "Nguyen Van A",
   "role": "user",
   "iat": 1706500000,
   "exp": 1706500900
@@ -601,15 +355,13 @@ CREATE TABLE refresh_tokens (
 | Claim | Type | Description |
 |-------|------|-------------|
 | sub | string | User ID |
-| email | string | Email của user |
-| name | string | Tên user |
 | role | string | Vai trò (user, admin,...) |
 | iat | number | Thời gian tạo token (Unix timestamp) |
 | exp | number | Thời gian hết hạn (Unix timestamp) |
 
 **Expiry:** 15 phút (900 giây)
 
-### 5.2 Refresh Token
+### 3.2 Refresh Token
 
 **Header:**
 ```json
@@ -640,9 +392,9 @@ CREATE TABLE refresh_tokens (
 
 ---
 
-## 6. Error Codes
+## 4. Error Codes
 
-### 6.1 Tổng hợp Error Codes
+### 4.1 Tổng hợp Error Codes
 
 | Code | HTTP Status | Description |
 |------|-------------|-------------|
@@ -661,7 +413,7 @@ CREATE TABLE refresh_tokens (
 | GOOGLE_API_ERROR | 500 | Lỗi khi gọi Google API |
 | INTERNAL_ERROR | 500 | Lỗi server nội bộ |
 
-### 6.2 Error Response Format
+### 4.2 Error Response Format
 
 ```json
 {
@@ -675,38 +427,71 @@ CREATE TABLE refresh_tokens (
 
 ---
 
-## 7. Security Considerations
+# 5. Security Considerations
 
-### 7.1 Token Storage
+## 5.1 Token Storage Strategy (Why HttpOnly Cookie?)
 
-| Token | Storage | Lý do |
-|-------|---------|-------|
-| Access Token | Memory hoặc localStorage | Cần truy cập từ JS để gửi trong header |
-| Refresh Token | HttpOnly Cookie | Bảo vệ khỏi XSS attack |
+Việc lựa chọn nơi lưu trữ Token là sự cân nhắc giữa rủi ro **XSS (Cross-Site Scripting)** và **CSRF (Cross-Site Request Forgery)**.
 
-### 7.2 Cookie Configuration
+Chúng tôi quyết định sử dụng **HttpOnly Cookie** thay vì **LocalStorage / SessionStorage** vì các lý do sau:
 
-```
-Set-Cookie: refresh_token=xxx;
-  HttpOnly;           # Không thể truy cập từ JavaScript
-  Secure;             # Chỉ gửi qua HTTPS
-  SameSite=Strict;    # Chống CSRF
-  Path=/api/auth;     # Chỉ gửi cho auth endpoints
-  Max-Age=604800      # 7 ngày
-```
+| Tiêu chí | LocalStorage / JS Variable | HttpOnly Cookie (Được chọn) |
+|--------|----------------------------|-----------------------------|
+| **Cơ chế truy cập** | JavaScript có thể đọc/ghi trực tiếp | JavaScript **không thể truy cập** (thông qua flag `HttpOnly`). Chỉ trình duyệt mới có quyền gửi kèm request |
+| **Rủi ro XSS** | **Cao**. Nếu hacker chèn được mã độc JS vào trang web, chúng có thể đọc toàn bộ Token và gửi về server của chúng | **Thấp**. Hacker có thể thực thi lệnh JS, nhưng **không thể đánh cắp Raw Token** để sử dụng ở nơi khác |
+| **Rủi ro CSRF** | Thấp (vì JS phải tự đính kèm token vào header) | Trung bình / Cao. Trình duyệt tự động gửi cookie nên có thể bị lợi dụng |
+| **Giải pháp** | Khó khắc phục triệt để XSS | Có thể giảm thiểu CSRF bằng `SameSite` hoặc CSRF Token (Double Submit Cookie) |
 
-### 7.3 Best Practices
+**Kết luận**
 
-1. **Access Token ngắn hạn (15 phút):** Giảm thiểu rủi ro nếu token bị lộ
-2. **Refresh Token dài hạn (7 ngày):** UX tốt hơn, không cần login thường xuyên
+> Bảo vệ **Access Token khỏi bị đánh cắp thông qua XSS** quan trọng hơn.
+> Rủi ro CSRF sẽ được giảm thiểu thông qua **cấu hình Cookie** và **CORS chặt chẽ**.
 
-### 7.4 Checklist bảo mật
+---
 
-- [ ] Sử dụng HTTPS cho tất cả endpoints
-- [ ] Access Token expiry: 15 phút
-- [ ] Refresh Token expiry: 7 ngày
-- [ ] Refresh Token lưu trong HttpOnly cookie
-- [ ] Validate tất cả input từ client
-- [ ] Rate limiting cho login endpoint
-- [ ] Log tất cả login attempts
-- [ ] Có cơ chế revoke token khi cần
+## 5.2 Cookie Configuration Details
+
+Cấu hình dưới đây áp dụng cho kiến trúc **Cross-Domain**
+(Frontend và Backend nằm trên hai domain khác nhau, ví dụ: `app.com` và `api.com`).
+
+---
+
+### A. Access Token Cookie
+
+**Mục tiêu**
+
+- Dùng để xác thực từng request
+- Thời gian sống ngắn để giảm thiểu rủi ro nếu bị lộ session
+
+Set-Cookie: access_token=xxx;
+  HttpOnly;       # Bảo mật: JS client không thể đọc (Chặn XSS)
+  Secure;         # Bảo mật: Chỉ gửi qua HTTPS (Bắt buộc nếu SameSite=None)
+  SameSite=None;  # Cross-domain: Cho phép gửi cookie khi gọi từ domain khác
+  Path=/;         # Phạm vi: Có hiệu lực trên toàn bộ API endpoints
+  Max-Age=900     # Expiration: 15 phút (Đồng bộ với thời gian sống của JWT)
+
+### B. Refresh Token Cookie
+
+#### Mục tiêu
+
+- Dùng để lấy **Access Token** mới
+- Là thành phần **nhạy cảm nhất**, cần được bảo vệ kỹ và **hạn chế phạm vi gửi đi**
+
+```http
+Set-Cookie: refresh_token=yyy;
+  HttpOnly;
+  Secure;
+  SameSite=None;
+  Path=/api/auth/refresh; # TỐI ƯU HÓA: Chỉ gửi cookie khi gọi endpoint refresh
+  Max-Age=604800          # Expiration: 7 ngày (hoặc lâu hơn tùy nghiệp vụ)
+
+---
+
+## 5.3 Cross-Origin Resource Sharing (CORS)
+
+> Do sử dụng SameSite=None để hỗ trợ Cookie cross-domain,
+> CORS đóng vai trò là lớp bảo vệ thứ hai để ngăn các request trái phép từ > > domain lạ.
+
+---
+
+## 5.4 Cross-Site Request Forgery (CSRF)
