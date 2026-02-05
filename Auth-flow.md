@@ -489,9 +489,10 @@ Set-Cookie: refresh_token=yyy;
 ## 5.3 Cross-Origin Resource Sharing (CORS)
 
 > Do sử dụng SameSite=None để hỗ trợ Cookie cross-domain,
-> CORS đóng vai trò là lớp bảo vệ thứ hai để ngăn các request trái phép từ > > domain lạ.
+> CORS đóng vai trò là lớp bảo vệ thứ hai để ngăn các request trái phép từ domain lạ.
 
 ---
 
 ## 5.4 Cross-Site Request Forgery (CSRF)
+
 
