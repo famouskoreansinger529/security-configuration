@@ -477,7 +477,6 @@ Set-Cookie: access_token=xxx;
 - Dùng để lấy **Access Token** mới
 - Là thành phần **nhạy cảm nhất**, cần được bảo vệ kỹ và **hạn chế phạm vi gửi đi**
 
-```http
 Set-Cookie: refresh_token=yyy;
   HttpOnly;
   Secure;
@@ -495,3 +494,4 @@ Set-Cookie: refresh_token=yyy;
 ---
 
 ## 5.4 Cross-Site Request Forgery (CSRF)
+
